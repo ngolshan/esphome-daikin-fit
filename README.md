@@ -103,8 +103,7 @@ Decoded and running on the tested system. Open items:
 
 - operation mode code meanings, and codes for defrost
 - the inverter fin temperature unit (decoded as °C + 40, inferred)
-- three sensors marked "(Unverified)": dehumidification demand on both sides,
-  and defrost demand
+- Defrost Demand Received, marked "(Unverified)" until a defrost is seen
 - the monitor occasionally drops off the bus for a few minutes and rejoins
 
 ## License

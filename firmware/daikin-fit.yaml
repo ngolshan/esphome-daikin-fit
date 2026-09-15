@@ -203,9 +203,11 @@ comfortnet:
                 id(hp_minor_fault).publish_state(d.data[1]);
                 id(hp_heat_demand_received).publish_state(d.data[2] / 2.0f);
                 id(hp_cool_demand_received).publish_state(d.data[3] / 2.0f);
-                // UNVERIFIED (from upstream's comfortnet_heat_pump.yaml / the
-                // ClimateTalk status layout): byte 4 dehumidification demand,
-                // byte 7 defrost demand. Both read 0 in every capture so far.
+                // Byte 4: dehumidification demand received. Matched the cloud's
+                // ctOutdoorDeHumidificationRequestedDemand in 85 of 88 snapshots;
+                // during a dehumidification call it carries the demand and byte 3
+                // (cool) reads 0. Byte 7: defrost demand, UNVERIFIED (ClimateTalk
+                // status layout; no defrost seen yet).
                 id(hp_dehum_demand_received).publish_state(d.data[4] / 2.0f);
                 id(hp_defrost_demand_received).publish_state(d.data[7] / 2.0f);
                 if (!id(zc_dehum_demand).has_state() && d.data[4] == 0) id(zc_dehum_demand).publish_state(0.0f);
@@ -230,9 +232,9 @@ comfortnet:
   # or more (the request, the coordinator's relay, and the response); all copies
   # carry the same value.
   on_control_command:
-    # UNVERIFIED: Dehumidification Demand (0x62) has never been seen on this bus.
-    # Assumed to use the same payload layout as heat and cool demand (byte 1,
-    # half-percent).
+    # Dehumidification demand (0x62), the same layout as heat and cool demand:
+    # byte 1, half-percent. Seen as A0.C8 (100 %) and 00.00 from a Daikin One+,
+    # and as 70 % (demand x zone weight) from an EWC UT-3000.
     - control_command: 0x62
       then:
         - lambda: |-
@@ -283,12 +285,10 @@ sensor:
     accuracy_decimals: 1
   - platform: template
     id: zc_dehum_demand
-    # UNVERIFIED: command 0x62, never seen on this bus. VERIFY: enable
-    # dehumidification in the Daikin settings (ctOutdoorDehumidificationEnable
-    # read 1 = off), let indoor humidity exceed the 55 % setpoint during a
-    # cooling call, and check that this and Heat Pump Dehumidification Demand
-    # Received become non-zero together. Then drop "(Unverified)" from the name.
-    name: "Dehumidification Demand (Unverified)"
+    # Command 0x62. Matches the thermostat's own dehumidification demand (cloud
+    # ctControlAlgorithmDehumDemand: 200 = 100 %, then 0); a zone controller
+    # scales it by the zone weight, as it does cool demand.
+    name: \"Dehumidification Demand\"
     device_id: zone_controller
     unit_of_measurement: "%"
     icon: "mdi:water-percent"
@@ -332,11 +332,9 @@ sensor:
     accuracy_decimals: 1
   - platform: template
     id: hp_dehum_demand_received
-    # UNVERIFIED: heat pump status block 0x00 byte 4, per upstream's map; 0 in
-    # all 309 samples. VERIFY during a dehumidification call (see Zone Controller
-    # Dehumidification Demand); the cloud's ctOutdoorDeHumidificationRequestedDemand
-    # should match at twice this value. Then drop "(Unverified)" from the name.
-    name: "Dehumidification Demand Received (Unverified)"
+    # Status block 0x00 byte 4 (cloud: ctOutdoorDeHumidificationRequestedDemand,
+    # 97 % of 88 snapshots). Non-zero only while Cool Demand Received is 0.
+    name: \"Dehumidification Demand Received\"
     device_id: heat_pump
     unit_of_measurement: "%"
     icon: "mdi:water-percent"

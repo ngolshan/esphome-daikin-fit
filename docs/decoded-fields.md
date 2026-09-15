@@ -50,7 +50,7 @@ firmware from other readings.
 | Operation Mode Code | `05/0xA0` 35-byte, byte 3 | u8 code | Verified (97 %); meanings undocumented | `ctOutdoorOperationMode` |
 | Cool Demand Received | `05/0x82` DBID 0x00, byte 3 | half-percent | Verified (100 %) | `ctOutdoorCoolRequestedDemand` |
 | Heat Demand Received | `05/0x82` DBID 0x00, byte 2 | half-percent | Observed (tracked heat demand in the heating check) | `ctOutdoorHeatRequestedDemand` |
-| Dehumidification Demand Received (Unverified) | `05/0x82` DBID 0x00, byte 4 | half-percent | Unverified | `ctOutdoorDeHumidificationRequestedDemand` |
+| Dehumidification Demand Received | `05/0x82` DBID 0x00, byte 4 | half-percent | Verified (97 % of 88 snapshots) | `ctOutdoorDeHumidificationRequestedDemand` |
 | Defrost Demand Received (Unverified) | `05/0x82` DBID 0x00, byte 7 | half-percent | Unverified | — |
 | Critical Fault Code, Minor Fault Code | `05/0x82` DBID 0x00, bytes 0, 1 | u8 | Observed (0 throughout) | `ctOutdoorCriticalFault`, `ctOutdoorMinorFault` |
 | Requested Air Handler Fan | fan command `0x66` sent by the heat pump, byte 2 | half-percent | Verified (values match) | `ctOutdoorFanRequestedDemandPercentage` |
@@ -100,7 +100,7 @@ controller, or a thermostat connected directly to the equipment.
 | Cool Demand | command `0x65`, byte 1 | half-percent | Observed (matches Heat Pump Cool Demand Received) |
 | Heat Demand | command `0x64`, byte 1 | half-percent | Observed (heating check) |
 | Fan Demand | command `0x66` with byte 1 = `0x00`, byte 2 | half-percent | Observed |
-| Dehumidification Demand (Unverified) | command `0x62`, byte 1 | half-percent | Unverified; never seen |
+| Dehumidification Demand | command `0x62`, byte 1 | half-percent | Observed (matches the thermostat's `ctControlAlgorithmDehumDemand`) |
 
 ## Monitor
 
@@ -206,6 +206,27 @@ identical in every sample, so the cloud field match cannot tell which is which.
 Both show the fan command the air handler is following, from the heat pump
 during calls and from the thermostat or zone controller otherwise.
 
+### Dehumidification
+
+Checked during a dehumidification call on 2026-09-15 (Daikin One+ connected
+directly to the equipment, indoor humidity above its 55 % setpoint while
+cooling), with a bus capture and a cloud snapshot every 60 s:
+
+- **Zone Controller Dehumidification Demand** (command `0x62`) arrived as
+  `A0.C8` (100 %) during the call and `00.00` when it ended, matching the
+  thermostat's own dehumidification demand in the cloud
+  (`ctControlAlgorithmDehumDemand`: 200, then 0). Behind an EWC UT-3000 it read
+  70 %: the thermostat's 100 % scaled by the 70 % zone weight, as with cool
+  demand.
+- **Heat Pump Dehumidification Demand Received** (status byte 4) matched the
+  cloud's `ctOutdoorDeHumidificationRequestedDemand` in 85 of 88 snapshots
+  (97 %, 16 distinct values), and every change of the cloud's condensing unit
+  dehumidify demand in Home Assistant. While it is non-zero, Cool Demand
+  Received reads 0: the heat pump reports the call's demand in one byte or the
+  other, never both.
+- The cloud reported `ctOutdoorDehumidificationEnable` = 1 throughout; what that
+  value means is not documented.
+
 ### Zone controller demand after a reboot
 
 A zone controller sends a demand command only when its value changes, so after
@@ -230,14 +251,9 @@ non-zero value.
 ## Open questions
 
 - Operation mode codes for defrost and other heating states.
-- Verify the three "(Unverified)" sensors, then drop the suffix:
-  - **Dehumidification demand** (Zone Controller command `0x62`, Heat Pump
-    status byte 4): with dehumidification enabled in the Daikin settings and
-    indoor humidity above the setpoint during cooling, both should turn
-    non-zero together, with the cloud's
-    `ctOutdoorDeHumidificationRequestedDemand` at twice the heat pump value.
-  - **Defrost demand** (Heat Pump status byte 7): during a heating-season
-    defrost it should turn non-zero while Operation Mode Code shows a new value.
+- Verify Defrost Demand Received (Heat Pump status byte 7): during a
+  heating-season defrost it should turn non-zero while Operation Mode Code
+  shows a new value. Then drop "(Unverified)" from its name.
 - The inverter fin temperature unit.
 - Why Air Handler Liquid Line Temperature reads below return air when heating.
 - Which air handler fan demand byte is "current" and which "received".
