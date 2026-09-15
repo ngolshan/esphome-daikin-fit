@@ -1,0 +1,64 @@
+name: Equipment report
+description: Report how the decode works (or doesn't) on your Daikin Fit equipment
+title: "Equipment report: <outdoor model> + <indoor model>"
+labels: ["equipment report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing on your system. Every field so far was verified on one
+        DH7VSA2410A heat pump and DFVE36CP1300 air handler, so reports from other
+        equipment are how this gets better. Model numbers are on the unit's rating
+        plate.
+  - type: input
+    id: outdoor
+    attributes:
+      label: Outdoor unit model
+      placeholder: DH7VSA2410AA
+    validations:
+      required: true
+  - type: input
+    id: indoor
+    attributes:
+      label: Indoor unit model (air handler or furnace)
+      placeholder: DFVE36CP1300AA
+    validations:
+      required: true
+  - type: input
+    id: thermostat
+    attributes:
+      label: Thermostat(s) and zone controller, if any
+      placeholder: Daikin One+, EWC UT-3000
+  - type: input
+    id: board
+    attributes:
+      label: Monitor board and ESPHome version
+      placeholder: Waveshare ESP32-S3-RS485-CAN, ESPHome 2026.8.2
+  - type: dropdown
+    id: transmit
+    attributes:
+      label: Bus Transmit
+      options:
+        - "Off (listen only)"
+        - "On (joined)"
+        - "Tried both"
+    validations:
+      required: true
+  - type: textarea
+    id: working
+    attributes:
+      label: What reads correctly
+      description: Entities that match the thermostat, the Daikin app or the equipment.
+  - type: textarea
+    id: wrong
+    attributes:
+      label: What is missing or wrong
+      description: Entities that stay empty or read implausible values, with what you expected.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Capture or log excerpt
+      description: |
+        Optional. A DEBUG log or capture (docs/decoding-other-models.md). Remove serial
+        numbers, MAC addresses and anything else identifying before posting.
+      render: text
