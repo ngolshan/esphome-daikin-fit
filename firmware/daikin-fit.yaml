@@ -288,7 +288,7 @@ sensor:
     # Command 0x62. Matches the thermostat's own dehumidification demand (cloud
     # ctControlAlgorithmDehumDemand: 200 = 100 %, then 0); a zone controller
     # scales it by the zone weight, as it does cool demand.
-    name: \"Dehumidification Demand\"
+    name: "Dehumidification Demand"
     device_id: zone_controller
     unit_of_measurement: "%"
     icon: "mdi:water-percent"
@@ -334,7 +334,7 @@ sensor:
     id: hp_dehum_demand_received
     # Status block 0x00 byte 4 (cloud: ctOutdoorDeHumidificationRequestedDemand,
     # 97 % of 88 snapshots). Non-zero only while Cool Demand Received is 0.
-    name: \"Dehumidification Demand Received\"
+    name: "Dehumidification Demand Received"
     device_id: heat_pump
     unit_of_measurement: "%"
     icon: "mdi:water-percent"
