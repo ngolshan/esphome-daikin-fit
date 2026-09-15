@@ -247,6 +247,10 @@ non-zero value.
   heating; it may be the air handler's mode.
 - **A second discharge temperature** at byte 26 of the 35-byte block matched
   only 39 % of snapshots; the 60-byte one is used.
+- **Command `0x60`, damper closure position demand.** A Daikin One+ sends it
+  repeatedly with every value at `C8` (100 %). It is deliberately not decoded
+  into an entity: a zone controller takes exclusive control of the dampers, so
+  what the thermostat asks for here has no visible effect on a zoned system.
 
 ## Open questions
 
