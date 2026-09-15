@@ -1,0 +1,19 @@
+# Secrets: firmware/secrets.yaml.example is the template.
+secrets.yaml
+
+# ESPHome build output
+.esphome/
+*.bin
+
+# Real captures and Home Assistant exports can contain equipment serial numbers.
+captures/
+*.log
+!tests/*.log
+*.csv
+
+# Python
+__pycache__/
+*.pyc
+
+# Local workspace, not part of the project
+diagnostics/

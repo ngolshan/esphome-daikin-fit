@@ -1,0 +1,96 @@
+---
+# ESPHome Daikin Fit: device config for the Waveshare ESP32-S3-RS485-CAN.
+#
+# Before building: read ../docs/wiring.md, and copy secrets.yaml.example to
+# secrets.yaml. Build from a full checkout of this repository; the component
+# and package paths below are relative.
+#
+# LISTEN ONLY BY DEFAULT. Nothing is written to the bus until you turn the
+# "Bus Transmit" switch on in Home Assistant. With it on, the monitor joins the
+# ClimateTalk network and requests the Daikin vendor data itself, which is
+# needed when a zone controller sits between the thermostats and the equipment
+# (see ../docs/how-it-works.md). To change what happens at power-up, set
+# bus_transmit_at_boot below to ALWAYS_OFF, RESTORE_DEFAULT_OFF or ALWAYS_ON.
+
+substitutions:
+  name: "daikin-bus-monitor"
+  friendly_name: "Daikin Bus Monitor"
+  bus_transmit_at_boot: ALWAYS_OFF
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  comment: "Daikin Fit CT-485 bus monitor"
+  project:
+    name: "ngolshan.esphome-daikin-fit"
+    version: "1.0.0"
+  on_boot:
+    then:
+      - lambda: App.set_loop_interval(0);
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: ../components
+    components: [comfortnet]
+
+packages:
+  daikin_fit: !include daikin-fit.yaml
+
+preferences:
+  flash_write_interval: 24h
+
+logger:
+  # DEBUG keeps the per-frame dump that tools/ctlog.py and tools/ctcap.py read.
+  level: DEBUG
+  # The default 1024 drops frame lines under sustained bus traffic.
+  tx_buffer_size: 4096
+
+api:
+  encryption:
+    key: !secret daikin_bus_monitor_api_key
+
+ota:
+  - platform: esphome
+    password: !secret daikin_bus_monitor_ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "Daikin Bus Monitor Fallback"
+    password: !secret fallback_wifi_password
+
+captive_portal:
+
+# Wall-clock log timestamps, so captures line up with Home Assistant history.
+time:
+  - platform: homeassistant
+    id: ha_time
+
+uart:
+  id: comfortnet_uart
+  baud_rate: 9600
+  data_bits: 8
+  stop_bits: 1
+  parity: NONE
+  rx_buffer_size: 1500
+  tx_pin: GPIO17
+  rx_pin: GPIO18
+
+comfortnet:
+  id: comfortnet_id
+  uart_id: comfortnet_uart
+  # RS485 driver enable. On this board it is under GPIO control: left unset, the
+  # pin floats and can jam the bus. Do not remove it (see ../docs/wiring.md).
+  flow_control_pin: GPIO21
+  # Start silent; the Bus Transmit switch decides whether to transmit.
+  listen_only: true
+  # Minimum time between repeats of a vendor data poll.
+  update_interval: 60s
+  device_type: 0x1D  # gateway
+  ct_version: 2

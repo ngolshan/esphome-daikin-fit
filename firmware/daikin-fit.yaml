@@ -1,0 +1,724 @@
+---
+# ESPHome Daikin Fit: decode package.
+#
+# Decodes Daikin Fit heat pump and air handler telemetry from the ClimateTalk /
+# CT-485 bus and publishes it to Home Assistant, together with the monitor's
+# own bus entities. Include it from a device config that defines the uart and a
+# `comfortnet:` block with `id: comfortnet_id` (see
+# waveshare-esp32-s3-rs485-can.yaml), with the ComfortNet component from
+# ../components.
+#
+# Field sources, encodings and confidence: docs/decoded-fields.md. Verified on a
+# DH7VSA2410A heat pump and a DFVE36CP1300 air handler only.
+#
+# Only values carried on the bus are published; nothing here is computed from
+# other readings.
+#
+# Entity naming: <Equipment> [Requested] <Part or line> <Quantity> [Received]
+#   Equipment  Zone Controller | Heat Pump | Air Handler. Each is an ESPHome
+#              sub-device (its own device page in Home Assistant, connected
+#              via the monitor), so the entity names below leave it out and
+#              Home Assistant shows "<Equipment> <name>". The monitor's own
+#              Bus / Monitor entities are at the end of this file.
+#   Part/line  Compressor, Compressor Suction, Compressor Discharge, Inverter,
+#              Fan, Blower, EEV, Coil, Liquid Line, Vapor Line, or none.
+#              Names give the physical point, never its role in one mode:
+#              compressor suction/discharge are always the low/high side;
+#              the liquid line (small pipe) and vapor line (large pipe) join
+#              the two units; superheat and subcooling are named after the
+#              line temperature they use.
+#   Requested  a value this equipment asks of another part, named after the
+#              part asked ("Heat Pump Requested Air Handler Airflow")
+#   Received   demand this equipment reports having been sent
+#              ("Heat Pump Cool Demand Received")
+
+substitutions:
+  # Bus Transmit switch state at power-up: ALWAYS_OFF (listen only after every
+  # boot), RESTORE_DEFAULT_OFF (remember the last position) or ALWAYS_ON (join
+  # after every boot). Override it in the device config.
+  bus_transmit_at_boot: ALWAYS_OFF
+
+esphome:
+  # Sub-devices need a recent ESPHome.
+  min_version: "2025.7.0"
+  includes:
+    - <vector>
+  # One Home Assistant device per piece of equipment, so each gets its own
+  # Sensors list instead of one long list on the monitor.
+  devices:
+    - id: zone_controller
+      name: "Zone Controller"
+    - id: heat_pump
+      name: "Heat Pump"
+    - id: air_handler
+      name: "Air Handler"
+
+comfortnet:
+  on_packet:
+    # Heat pump, Get Mfr Generic Data response. The 60-byte layout answers the
+    # 0x0209 request (from the monitor, a zone controller or a thermostat; all
+    # give the same layout). The 35-byte layout answers the air handler's own
+    # requests.
+    - packet_type: 0xA0
+      target_device_type: 0x05
+      register_polling: true
+      poll_payload: [0x09, 0x00, 0x02, 0x02, 0x00, 0xC8, 0xFF, 0x00, 0x00]
+      then:
+        - lambda: |-
+            client->device_poll_to_end(data.node_type, data.packet_type_request);
+            const uint8_t *p = data.payload;
+            auto ct_temp = [](const uint8_t *b) -> float {
+              uint16_t raw = (b[1] << 8) | b[0];
+              if (!(raw & 0x8000)) return NAN;
+              float v = ((raw >> 4) & 0x3FF) + (raw & 0x0F) / 16.0f;
+              return (raw & 0x4000) ? -v : v;
+            };
+            if (data.payload_len == 60) {
+              id(hp_frequency_request).publish_state(p[3] / 2.0f);
+              id(hp_power).publish_state(p[8] * 10.0f);
+              id(ah_power).publish_state(((p[11] << 8) | p[10]) / 10.0f);
+              id(hp_compressor_speed).publish_state(p[14]);
+              id(hp_compressor_current).publish_state(p[15] / 10.0f);
+              id(hp_inverter_current).publish_state(p[18] / 10.0f);
+              // Byte 19: inverter fin temperature, uint8 degC with a +40 offset.
+              id(hp_inverter_fin_temp).publish_state((p[19] - 40) * 1.8f + 32.0f);
+              id(hp_compressor_target).publish_state(p[20]);
+              id(hp_fan_target).publish_state(p[22] * 10.0f);
+              id(hp_eev_opening).publish_state(p[23] / 2.0f);
+              id(hp_outdoor_air_temp).publish_state(ct_temp(p + 25));
+              id(hp_fan_speed).publish_state(p[27] * 10.0f);
+              id(hp_discharge_temp).publish_state(ct_temp(p + 28));
+              id(hp_coil_temp).publish_state(ct_temp(p + 30));
+              id(hp_defrost_temp).publish_state(ct_temp(p + 32));
+              id(hp_liquid_temp).publish_state(ct_temp(p + 34));
+              id(hp_suction_pressure).publish_state(p[36]);
+              id(hp_suction_temp).publish_state(ct_temp(p + 38));
+              id(hp_compressor_runtime).publish_state((p[41] << 8) | p[40]);
+              id(hp_ah_airflow_request).publish_state((p[44] << 8) | p[43]);
+            } else if (data.payload_len == 35) {
+              // Byte 3: an operation mode code whose meanings are undocumented;
+              // published as the plain number. See the sensor definition.
+              id(hp_operation_mode_code).publish_state(p[3]);
+            }
+
+    # Air handler, Get Mfr Generic Data response: blower speed and EEV opening.
+    # Behind a zone controller nothing else requests this, so without the
+    # monitor's poll it never appears.
+    - packet_type: 0xA0
+      target_device_type: 0x03
+      register_polling: true
+      poll_payload: [0x09, 0x00, 0x03]
+      then:
+        - lambda: |-
+            client->device_poll_to_end(data.node_type, data.packet_type_request);
+            if (data.payload_len == 9) {
+              id(ah_blower_speed).publish_state((data.payload[4] << 8) | data.payload[3]);
+              // Half-percent: 200 (fully open) for the whole heating run.
+              id(ah_eev_opening).publish_state(data.payload[5] / 2.0f);
+            }
+
+    # Air handler status. Block 0x00 (20 bytes): fan demand and airflow. Block
+    # 0x01 (43 bytes): superheat and subcooling as the air handler computes
+    # them. Upstream's furnace package expects a 22-byte block 0x00 and node
+    # type 0x02.
+    - packet_type: 0x82
+      target_device_type: 0x03
+      then:
+        - lambda: |-
+            std::vector<comfortnet::DBIDDatagram> parsed;
+            client->read_mdi(data.payload, data.payload_len, &parsed);
+            auto ct_temp = [](const uint8_t *b) -> float {
+              uint16_t raw = (b[1] << 8) | b[0];
+              if (!(raw & 0x8000)) return NAN;
+              float v = ((raw >> 4) & 0x3FF) + (raw & 0x0F) / 16.0f;
+              return (raw & 0x4000) ? -v : v;
+            };
+            for (auto &d : parsed) {
+              if (d.dbid_tag == 0x00 && d.db_len >= 16) {
+                id(ah_fan_demand).publish_state(d.data[4] / 2.0f);
+                id(ah_airflow).publish_state((d.data[13] << 8) | d.data[12]);
+                id(ah_fan_demand_received).publish_state(d.data[15] / 2.0f);
+                // The zone controller only sends a fan command when its value
+                // changes, so after a reboot its fan demand is unknown until
+                // the next change. If the air handler reports no fan demand
+                // from anyone, the zone controller's last fan command was 0.
+                if (!id(zc_fan_demand).has_state() && d.data[4] == 0 && d.data[15] == 0) {
+                  id(zc_fan_demand).publish_state(0.0f);
+                }
+              } else if (d.dbid_tag == 0x01 && d.db_len >= 41) {
+                id(ah_vapor_superheat).publish_state(ct_temp(d.data + 9));
+                id(ah_liquid_subcooling).publish_state(ct_temp(d.data + 39));
+              }
+            }
+
+    # Air handler sensor data, block 0x02: refrigerant temperatures and coil
+    # pressure. (Blocks 0x00 and 0x01, return and supply air in upstream's
+    # mapping, read as invalid on this unit.)
+    #
+    # Polled every 20 s (the zone controller alone requests it about every 2 min).
+    # Measured 2026-09-13: the air handler offers a turn about once per 16.5 s
+    # dataflow cycle, so ~17 s is the practical floor; 20 s adds about three
+    # short exchanges a minute. Back off to 30 s if request timeouts or missed
+    # acknowledgements appear.
+    - packet_type: 0x87
+      target_device_type: 0x03
+      register_polling: true
+      poll_interval: 20s
+      then:
+        - lambda: |-
+            client->device_poll_to_end(data.node_type, data.packet_type_request);
+            std::vector<comfortnet::DBIDDatagram> parsed;
+            client->read_mdi(data.payload, data.payload_len, &parsed);
+            auto ct_temp = [](const uint8_t *b) -> float {
+              uint16_t raw = (b[1] << 8) | b[0];
+              if (!(raw & 0x8000)) return NAN;
+              float v = ((raw >> 4) & 0x3FF) + (raw & 0x0F) / 16.0f;
+              return (raw & 0x4000) ? -v : v;
+            };
+            for (auto &d : parsed) {
+              if (d.dbid_tag == 0x02 && d.db_len >= 14) {
+                id(ah_liquid_temp).publish_state(ct_temp(d.data));
+                id(ah_vapor_temp).publish_state(ct_temp(d.data + 2));
+                // Bytes 12-13: bit 15 valid, low 12 bits psig (matches the
+                // cloud's ctAHPressureSensor; byte 13 read 0x80 in every
+                // capture so far).
+                uint16_t w = (d.data[13] << 8) | d.data[12];
+                float psig = (w & 0x8000) ? (float) (w & 0x0FFF) : NAN;
+                id(ah_coil_pressure).publish_state(psig);
+              }
+            }
+
+    # Heat pump status, block 0x00 (12 bytes): faults and the demand the heat
+    # pump reports receiving. Byte 3 matched the cloud's cool demand in all 36
+    # cloud snapshots.
+    - packet_type: 0x82
+      target_device_type: 0x05
+      then:
+        - lambda: |-
+            std::vector<comfortnet::DBIDDatagram> parsed;
+            client->read_mdi(data.payload, data.payload_len, &parsed);
+            for (auto &d : parsed) {
+              if (d.dbid_tag == 0x00 && d.db_len == 12) {
+                id(hp_critical_fault).publish_state(d.data[0]);
+                id(hp_minor_fault).publish_state(d.data[1]);
+                id(hp_heat_demand_received).publish_state(d.data[2] / 2.0f);
+                id(hp_cool_demand_received).publish_state(d.data[3] / 2.0f);
+                // UNVERIFIED (from upstream's comfortnet_heat_pump.yaml / the
+                // ClimateTalk status layout): byte 4 dehumidification demand,
+                // byte 7 defrost demand. Both read 0 in every capture so far.
+                id(hp_dehum_demand_received).publish_state(d.data[4] / 2.0f);
+                id(hp_defrost_demand_received).publish_state(d.data[7] / 2.0f);
+                if (!id(zc_dehum_demand).has_state() && d.data[4] == 0) id(zc_dehum_demand).publish_state(0.0f);
+                // As for fan demand: after a reboot the zone controller's heat and
+                // cool demand stay unknown until it next changes them. Zero
+                // demand received by the heat pump means its last command was
+                // 0. A non-zero value is not used, since the heat pump's copy
+                // can lag the zone controller's command.
+                if (!id(zc_heat_demand).has_state() && d.data[2] == 0) id(zc_heat_demand).publish_state(0.0f);
+                if (!id(zc_cool_demand).has_state() && d.data[3] == 0) id(zc_cool_demand).publish_state(0.0f);
+              }
+            }
+
+  # Demand commands on the bus. Heat and cool demand come only from the zone
+  # board (or the thermostat, when there is none). Fan demand (0x66) has two senders, told
+  # apart by payload byte 1:
+  #   xx.00.nn  zone controller or thermostat (60.00.nn via a zone controller, a0.00.nn from a thermostat)
+  #   xx.01.nn  the heat pump asking the air handler for airflow when cooling,
+  #             including its wind-down after cooling stops
+  #   xx.02.nn  the same request from the heat pump when heating
+  # Any non-zero byte 1 is treated as the heat pump. Every command is seen twice
+  # or more (the request, the coordinator's relay, and the response); all copies
+  # carry the same value.
+  on_control_command:
+    # UNVERIFIED: Dehumidification Demand (0x62) has never been seen on this bus.
+    # Assumed to use the same payload layout as heat and cool demand (byte 1,
+    # half-percent).
+    - control_command: 0x62
+      then:
+        - lambda: |-
+            if (data.payload_len >= 2) id(zc_dehum_demand).publish_state(data.payload[1] / 2.0f);
+    - control_command: 0x64
+      then:
+        - lambda: |-
+            if (data.payload_len >= 2) id(zc_heat_demand).publish_state(data.payload[1] / 2.0f);
+    - control_command: 0x65
+      then:
+        - lambda: |-
+            if (data.payload_len >= 2) id(zc_cool_demand).publish_state(data.payload[1] / 2.0f);
+    - control_command: 0x66
+      then:
+        - lambda: |-
+            if (data.payload_len < 3) return;
+            if (data.payload[1] == 0x00) {
+              id(zc_fan_demand).publish_state(data.payload[2] / 2.0f);
+            } else {
+              id(hp_ah_fan_request).publish_state(data.payload[2] / 2.0f);
+            }
+
+sensor:
+  # --- zone controller -------------------------------------------------------------
+  - platform: template
+    id: zc_cool_demand
+    name: "Cool Demand"
+    device_id: zone_controller
+    unit_of_measurement: "%"
+    icon: "mdi:snowflake"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: zc_heat_demand
+    name: "Heat Demand"
+    device_id: zone_controller
+    unit_of_measurement: "%"
+    icon: "mdi:fire"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: zc_fan_demand
+    name: "Fan Demand"
+    device_id: zone_controller
+    unit_of_measurement: "%"
+    icon: "mdi:fan"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: zc_dehum_demand
+    # UNVERIFIED: command 0x62, never seen on this bus. VERIFY: enable
+    # dehumidification in the Daikin settings (ctOutdoorDehumidificationEnable
+    # read 1 = off), let indoor humidity exceed the 55 % setpoint during a
+    # cooling call, and check that this and Heat Pump Dehumidification Demand
+    # Received become non-zero together. Then drop "(Unverified)" from the name.
+    name: "Dehumidification Demand (Unverified)"
+    device_id: zone_controller
+    unit_of_measurement: "%"
+    icon: "mdi:water-percent"
+    state_class: measurement
+    accuracy_decimals: 1
+
+  # --- heat pump (outdoor unit) -----------------------------------------------
+  - platform: template
+    id: hp_operation_mode_code
+    # 35-byte 0xA0, byte 3 (cloud field ctOutdoorOperationMode), published as a
+    # whole number. No source documents what the numbers mean:
+    #   * Daikin's outdoor unit manual (DH7VSA, Monitor Mode item 2) defines a
+    #     different "operation code": 0 Stop, 1 Cooling Start-up, 2 Heating
+    #     Start-up, 3 Oil Return, 4 Heating, 5 Defrost, 6 Cooling. It does not
+    #     match this byte: the cloud pairs this byte's 5 with "Cooling", and
+    #     the byte reaches 7, 8, 9 and 12.
+    #   * The only Daikin-side pairs seen are cloud snapshots reporting both this
+    #     number and ctOutdoorMode text: 0, 2 and 4 with "Stop", 5 and 6 with
+    #     "Cooling" (cooling run only).
+    # Values seen so far: 0-9 and 12. No state class, so Home Assistant does not
+    # average codes.
+    name: "Operation Mode Code"
+    device_id: heat_pump
+    icon: "mdi:numeric"
+    accuracy_decimals: 0
+  - platform: template
+    id: hp_cool_demand_received
+    name: "Cool Demand Received"
+    device_id: heat_pump
+    unit_of_measurement: "%"
+    icon: "mdi:snowflake"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: hp_heat_demand_received
+    name: "Heat Demand Received"
+    device_id: heat_pump
+    unit_of_measurement: "%"
+    icon: "mdi:fire"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: hp_dehum_demand_received
+    # UNVERIFIED: heat pump status block 0x00 byte 4, per upstream's map; 0 in
+    # all 309 samples. VERIFY during a dehumidification call (see Zone Controller
+    # Dehumidification Demand); the cloud's ctOutdoorDeHumidificationRequestedDemand
+    # should match at twice this value. Then drop "(Unverified)" from the name.
+    name: "Dehumidification Demand Received (Unverified)"
+    device_id: heat_pump
+    unit_of_measurement: "%"
+    icon: "mdi:water-percent"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: hp_defrost_demand_received
+    # UNVERIFIED: heat pump status block 0x00 byte 7, per upstream's map; 0 in
+    # all 309 samples (no defrost has happened). VERIFY during a heating-season
+    # defrost: Heat Pump Operation Mode Code should show an unfamiliar value at
+    # the same time as this becomes non-zero. Then drop "(Unverified)" from the name.
+    name: "Defrost Demand Received (Unverified)"
+    device_id: heat_pump
+    unit_of_measurement: "%"
+    icon: "mdi:snowflake-melt"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: hp_ah_fan_request
+    # The heat pump's own 0x66 fan command to the air handler (cloud:
+    # ctOutdoorFanRequestedDemandPercentage).
+    name: "Requested Air Handler Fan"
+    device_id: heat_pump
+    unit_of_measurement: "%"
+    icon: "mdi:fan-chevron-up"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: hp_ah_airflow_request
+    name: "Requested Air Handler Airflow"
+    device_id: heat_pump
+    device_class: volume_flow_rate
+    icon: "mdi:weather-windy"
+    unit_of_measurement: "ft³/min"
+    state_class: measurement
+    accuracy_decimals: 0
+  - platform: template
+    id: hp_frequency_request
+    # Cloud: ctOutdoorFrequencyInPercent. Follows demand; can read 0 while the
+    # compressor is still winding down.
+    name: "Requested Compressor Frequency"
+    device_id: heat_pump
+    unit_of_measurement: "%"
+    icon: "mdi:sine-wave"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: hp_compressor_speed
+    name: "Compressor Speed"
+    device_id: heat_pump
+    unit_of_measurement: "rps"
+    icon: "mdi:speedometer"
+    state_class: measurement
+    accuracy_decimals: 0
+  - platform: template
+    id: hp_compressor_target
+    name: "Compressor Target Speed"
+    device_id: heat_pump
+    unit_of_measurement: "rps"
+    icon: "mdi:speedometer-medium"
+    state_class: measurement
+    accuracy_decimals: 0
+  - platform: template
+    id: hp_compressor_current
+    name: "Compressor Current"
+    device_id: heat_pump
+    device_class: current
+    unit_of_measurement: "A"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: hp_compressor_runtime
+    # Cumulative hours; stepped from 632 to 633 during 2026-09-12.
+    name: "Compressor Runtime"
+    device_id: heat_pump
+    device_class: duration
+    unit_of_measurement: "h"
+    state_class: total_increasing
+    accuracy_decimals: 0
+  - platform: template
+    id: hp_inverter_current
+    name: "Inverter Current"
+    device_id: heat_pump
+    device_class: current
+    unit_of_measurement: "A"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: hp_inverter_fin_temp
+    # Cloud: ctInverterFinTemp; the byte tracks it exactly. Encoding inferred
+    # as uint8 degC + 40 (range -40 to 215 degC), not confirmed by Daikin:
+    #   * as degF, the idle heatsink would sit 5-18 degF below outdoor air in
+    #     every settled sample, which a powered heatsink cannot do
+    #   * as plain degC, an idle unit drawing 10 W would be at 62-65 degC
+    #     (144-149 degF), about 30 degC short of the 93-95 degC fin overheat trip
+    #     (E32 at 95 degC in the DX6VS service instructions, SM-SIUS612209EA)
+    #   * as degC + 40, settled idle is within -8 to +6 degF of outdoor air
+    #     (below it in afternoon sun, above it in the evening) and 35 min at
+    #     1.5 kW raises it 7 degC
+    # Resolution is 1 degC (1.8 degF). No public source gives the encoding: the
+    # DX6VS service instructions only read fin temperature with Daikin's
+    # D-checker tool, and it is not in the 7-segment monitoring mode.
+    name: "Inverter Fin Temperature"
+    device_id: heat_pump
+    device_class: temperature
+    unit_of_measurement: "°F"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: hp_power
+    name: "Power"
+    device_id: heat_pump
+    device_class: power
+    unit_of_measurement: "W"
+    state_class: measurement
+    accuracy_decimals: 0
+  - platform: template
+    id: hp_fan_speed
+    name: "Fan Speed"
+    device_id: heat_pump
+    unit_of_measurement: "rpm"
+    icon: "mdi:fan"
+    state_class: measurement
+    accuracy_decimals: 0
+  - platform: template
+    id: hp_fan_target
+    name: "Fan Target Speed"
+    device_id: heat_pump
+    unit_of_measurement: "rpm"
+    icon: "mdi:fan-clock"
+    state_class: measurement
+    accuracy_decimals: 0
+  - platform: template
+    id: hp_eev_opening
+    # Candidate: byte 23 held only 0 and 68 in the cooling decode run and
+    # varied 7-31 % when heating.
+    name: "EEV Opening"
+    device_id: heat_pump
+    unit_of_measurement: "%"
+    icon: "mdi:valve"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: hp_outdoor_air_temp
+    name: "Outdoor Air Temperature"
+    device_id: heat_pump
+    device_class: temperature
+    unit_of_measurement: "°F"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: hp_coil_temp
+    name: "Coil Temperature"
+    device_id: heat_pump
+    device_class: temperature
+    unit_of_measurement: "°F"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: hp_defrost_temp
+    name: "Defrost Sensor Temperature"
+    device_id: heat_pump
+    device_class: temperature
+    unit_of_measurement: "°F"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: hp_discharge_temp
+    name: "Compressor Discharge Temperature"
+    device_id: heat_pump
+    device_class: temperature
+    unit_of_measurement: "°F"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: hp_liquid_temp
+    name: "Liquid Line Temperature"
+    device_id: heat_pump
+    device_class: temperature
+    unit_of_measurement: "°F"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: hp_suction_temp
+    # Compressor inlet, the low side in both modes: suction pressure fell and
+    # stayed 10-14 degF above saturation when heating.
+    name: "Compressor Suction Temperature"
+    device_id: heat_pump
+    device_class: temperature
+    unit_of_measurement: "°F"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: hp_suction_pressure
+    # Gauge pressure (psig).
+    name: "Compressor Suction Pressure"
+    device_id: heat_pump
+    device_class: pressure
+    unit_of_measurement: "psi"
+    state_class: measurement
+    accuracy_decimals: 0
+  - platform: template
+    id: hp_critical_fault
+    name: "Critical Fault Code"
+    device_id: heat_pump
+    icon: "mdi:alert"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+  - platform: template
+    id: hp_minor_fault
+    name: "Minor Fault Code"
+    device_id: heat_pump
+    icon: "mdi:alert-outline"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+
+  # --- air handler (indoor unit) ----------------------------------------------
+  - platform: template
+    id: ah_fan_demand
+    # Status block 0x00 byte 4, matched to the cloud's ctAHFanCurrentDemandStatus.
+    # It and Fan Demand Received (byte 15) have been identical in every sample,
+    # so which cloud field belongs to which byte is not confirmed.
+    name: "Fan Demand Current"
+    device_id: air_handler
+    unit_of_measurement: "%"
+    icon: "mdi:fan"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: ah_fan_demand_received
+    # Status block 0x00 byte 15, matched to the cloud's ctAHFanRequestedDemand:
+    # the fan demand the air handler was given, by the zone controller or the heat
+    # pump. Identical to Fan Demand Current in every sample (see there).
+    name: "Fan Demand Received"
+    device_id: air_handler
+    unit_of_measurement: "%"
+    icon: "mdi:fan-clock"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: ah_airflow
+    name: "Airflow"
+    device_id: air_handler
+    device_class: volume_flow_rate
+    icon: "mdi:weather-windy"
+    unit_of_measurement: "ft³/min"
+    state_class: measurement
+    accuracy_decimals: 0
+  - platform: template
+    id: ah_blower_speed
+    name: "Blower Speed"
+    device_id: air_handler
+    unit_of_measurement: "rpm"
+    icon: "mdi:fan"
+    state_class: measurement
+    accuracy_decimals: 0
+  - platform: template
+    id: ah_power
+    # Reported by the heat pump (cloud: ctIndoorPower).
+    name: "Power"
+    device_id: air_handler
+    device_class: power
+    unit_of_measurement: "W"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: ah_eev_opening
+    # 9-byte 0xA0 byte 5, half-percent like the other Daikin percentages: 20
+    # at idle, up to 108 when cooling, 200 (fully open) when heating. The cloud
+    # field ctAHEEVOpenRate is the same unscaled byte.
+    name: "EEV Opening"
+    device_id: air_handler
+    unit_of_measurement: "%"
+    icon: "mdi:valve"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: ah_coil_pressure
+    # Gauge pressure (psig) from the air handler's refrigerant pressure sensor
+    # (cloud: ctAHPressureSensor).
+    name: "Coil Pressure"
+    device_id: air_handler
+    device_class: pressure
+    unit_of_measurement: "psi"
+    state_class: measurement
+    accuracy_decimals: 0
+  - platform: template
+    id: ah_liquid_temp
+    # In the heating check it stayed 65-69 degF with the coil condensing at
+    # 100-103 degF, colder than the ~73 degF return air. The air handler's own
+    # subcooling agrees, so the decode is right; the thermistor's position or
+    # the air reaching the coil does not match a coil-outlet reading.
+    name: "Liquid Line Temperature"
+    device_id: air_handler
+    device_class: temperature
+    unit_of_measurement: "°F"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: ah_vapor_temp
+    # The large pipe at the indoor coil (cloud: ctAHSuctionTemperature): suction
+    # gas when cooling, hot gas from the compressor when heating (rose to
+    # 129 degF in the heating check).
+    name: "Vapor Line Temperature"
+    device_id: air_handler
+    device_class: temperature
+    unit_of_measurement: "°F"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: ah_vapor_superheat
+    # As computed by the air handler: vapor line temperature minus coil
+    # saturation temperature (cloud: ctAHSuperHeatValue). Meaningful when
+    # cooling (evaporator superheat); large when heating.
+    name: "Vapor Line Superheat"
+    device_id: air_handler
+    unit_of_measurement: "°F"
+    icon: "mdi:thermometer-plus"
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: ah_liquid_subcooling
+    # As computed by the air handler: coil saturation temperature minus liquid
+    # line temperature (cloud: ctAHSubCoolValue). Meaningful in principle when
+    # heating (condenser subcooling), but read 33-36 degF in the heating check; see Air
+    # Handler Liquid Line Temperature. Negative or near zero when cooling.
+    name: "Liquid Line Subcooling"
+    device_id: air_handler
+    unit_of_measurement: "°F"
+    icon: "mdi:thermometer-minus"
+    state_class: measurement
+    accuracy_decimals: 1
+
+  # --- the monitor itself -----------------------------------------------------
+  - platform: uptime
+    name: "Monitor Uptime"
+    id: monitor_uptime
+    entity_category: diagnostic
+  - platform: wifi_signal
+    name: "Monitor WiFi Signal Strength"
+    id: monitor_wifi_signal
+    entity_category: diagnostic
+  - platform: template
+    # Discovery answers from nodes without an address. The EWC UT-3000 zone
+    # controller (MAC "CT300") keeps answering even while it operates as address
+    # 0x01; if its answer lands in the same cycle as the monitor's, the monitor
+    # is not given an address and retries.
+    name: "Bus Unjoined Discovery Responses"
+    id: unjoined_discovery_responses
+    icon: "mdi:account-question"
+    lambda: return id(comfortnet_id).get_unjoined_discovery_responses();
+    update_interval: 60s
+    state_class: total_increasing
+    accuracy_decimals: 0
+    entity_category: diagnostic
+
+switch:
+  - platform: template
+    name: "Bus Transmit"
+    id: bus_transmit
+    icon: "mdi:transmission-tower-export"
+    optimistic: true
+    # Off: listen only, nothing is written to the bus. On: join the network and
+    # request the vendor data blocks (docs/how-it-works.md).
+    restore_mode: ${bus_transmit_at_boot}
+    entity_category: config
+    turn_on_action:
+      - lambda: id(comfortnet_id).set_transmit_enabled(true);
+    turn_off_action:
+      - lambda: id(comfortnet_id).set_transmit_enabled(false);
+
+binary_sensor:
+  - platform: comfortnet
+    name: "Bus Joined"
+    id: bus_joined
+    device_class: connectivity
+    data_key: "NETWORK_STATUS"
+    entity_category: diagnostic
+
+button:
+  - platform: restart
+    name: "Monitor Restart"
+    id: monitor_restart
+    icon: "mdi:restart"
+    entity_category: config

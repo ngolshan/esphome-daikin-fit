@@ -1,0 +1,5 @@
+# Normalise to LF in the repo. ESPHome parses these YAML files on Linux (the
+# HAOS add-on), and the capture logs are compared byte-wise by the tools.
+* text=auto eol=lf
+*.png binary
+*.bin binary
