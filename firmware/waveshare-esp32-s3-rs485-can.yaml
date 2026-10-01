@@ -66,8 +66,8 @@ wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   ap:
+    # Open fallback hotspot, reachable only if wifi fails; add `password:` to close it.
     ssid: "Daikin Bus Monitor Fallback"
-    password: !secret fallback_wifi_password
 
 captive_portal:
 

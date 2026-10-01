@@ -62,24 +62,24 @@ struct PendingMessageByCommand : PendingMessage {
   SendMethodControlCommand command_type;
 
   PendingMessageByCommand(SendMethodControlCommand command_type, MessageType packet_type, std::vector<uint8_t> payload)
-      : command_type(command_type),
-        PendingMessage(SendMethod::CONTROL_COMMAND, static_cast<uint8_t>(command_type), packet_type, payload) {};
+      : PendingMessage(SendMethod::CONTROL_COMMAND, static_cast<uint8_t>(command_type), packet_type, payload),
+        command_type(command_type) {};
 };
 
 struct PendingMessageToType : PendingMessage {
   NodeType node_type;
 
   PendingMessageToType(NodeType node_type, MessageType packet_type, std::vector<uint8_t> payload)
-      : node_type(node_type),
-        PendingMessage(SendMethod::NODE_TYPE, static_cast<uint8_t>(node_type), packet_type, payload) {};
+      : PendingMessage(SendMethod::NODE_TYPE, static_cast<uint8_t>(node_type), packet_type, payload),
+        node_type(node_type) {};
 };
 
 struct PendingMessageToAddress : PendingMessage {
   NodeAddress dest_address;
 
   PendingMessageToAddress(NodeAddress dest_address, MessageType packet_type, std::vector<uint8_t> payload)
-      : dest_address(dest_address),
-        PendingMessage(SendMethod::NODE_ID, static_cast<uint8_t>(dest_address), packet_type, payload) {};
+      : PendingMessage(SendMethod::NODE_ID, static_cast<uint8_t>(dest_address), packet_type, payload),
+        dest_address(dest_address) {};
 };
 
 struct ComfortnetData {

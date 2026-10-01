@@ -9,7 +9,7 @@
 # GitHub, so it is the only file you need on the add-on.
 #
 # Secrets this needs in /config/esphome/secrets.yaml:
-#   wifi_ssid, wifi_password, fallback_wifi_password, daikin_bus_monitor_api_key
+#   wifi_ssid, wifi_password, daikin_bus_monitor_api_key
 # To take over a device that is already running, the api encryption key must be
 # the one it was flashed with, and `name` must match: OTA uploads authenticate
 # with that key.
@@ -71,8 +71,8 @@ wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   ap:
+    # Open fallback hotspot, reachable only if wifi fails; add `password:` to close it.
     ssid: "Daikin Bus Monitor Fallback"
-    password: !secret fallback_wifi_password
 
 captive_portal:
 
