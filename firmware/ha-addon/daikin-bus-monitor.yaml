@@ -9,7 +9,7 @@
 # GitHub, so it is the only file you need on the add-on.
 #
 # Secrets this needs in /config/esphome/secrets.yaml:
-#   wifi_ssid, wifi_password, daikin_bus_monitor_api_key
+#   wifi_ssid, wifi_password, daikin_bus_monitor__encryption_key
 # To take over a device that is already running, the api encryption key must be
 # the one it was flashed with, and `name` must match: OTA uploads authenticate
 # with that key.
@@ -57,7 +57,7 @@ logger:
 
 api:
   encryption:
-    key: !secret daikin_bus_monitor_api_key
+    key: !secret daikin_bus_monitor__encryption_key
 
 ota:
   - platform: esphome

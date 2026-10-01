@@ -68,7 +68,7 @@ void Comfortnet::dump_config() {
   ESP_LOGCONFIG(TAG, "  MAC: %02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x", mac_address_.mac[0], mac_address_.mac[1],
                 mac_address_.mac[2], mac_address_.mac[3], mac_address_.mac[4], mac_address_.mac[5], mac_address_.mac[6],
                 mac_address_.mac[7]);
-  ESP_LOGCONFIG(TAG, "  Device Type: %02x", device_type_);
+  ESP_LOGCONFIG(TAG, "  Device Type: %02x", static_cast<uint8_t>(device_type_));
   ESP_LOGCONFIG(TAG, "  Transmit: %s", this->transmit_enabled_ ? "enabled" : "disabled (listen only)");
   ESP_LOGCONFIG(TAG, "  Minimum poll interval: %" PRIu32 " ms", this->update_interval_millis_);
   for (const auto &e : this->polling_queue_) {
@@ -169,8 +169,10 @@ void Comfortnet::handle_message_(bool is_tx, uint32_t now) {
   ESP_LOGD(
       TAG,
       "%s  | 0x%02X | 0x%02X | 0x%02X   | 0x%02X | 0x%04X | 0x%02X    | 0x%02X    | 0x%02X   | %-3u | 0x%04X   | %s",
-      is_tx ? "TX" : "RX", dst_adr, src_adr, subnet, send_method, (send_param_1 << 8) | send_param_2, source_node_type,
-      message_type, packet_number, payload_len, crc, esphome::format_hex_pretty(payload, payload_len).c_str());
+      is_tx ? "TX" : "RX", static_cast<uint8_t>(dst_adr), static_cast<uint8_t>(src_adr),
+      static_cast<uint8_t>(subnet), static_cast<uint8_t>(send_method), (send_param_1 << 8) | send_param_2,
+      static_cast<uint8_t>(source_node_type), static_cast<uint8_t>(message_type), packet_number, payload_len, crc,
+      esphome::format_hex_pretty(payload, payload_len).c_str());
   if (is_tx) {
     if (message_type == MessageType::TOKEN_OFFER_RESPONSE) {
       // Most likely we won the token offer broadcast
@@ -239,7 +241,8 @@ void Comfortnet::handle_message_(bool is_tx, uint32_t now) {
                           this->device_type_, PACKET_RESPONSE(message_type),
                           PACKET_NUMBER(false, this->subnet_ == Subnet::VERSION_1), return_payload);
         this->awaiting_discovery_ = false;
-        ESP_LOGI(TAG, "Network address reassigned: 0x%02X (Old: 0x%02X)", this->node_id_, start_id);
+        ESP_LOGI(TAG, "Network address reassigned: 0x%02X (Old: 0x%02X)", static_cast<uint8_t>(this->node_id_),
+                 static_cast<uint8_t>(start_id));
       } else if (message_type == MessageType::TOKEN_OFFER && this->transmit_enabled_ && !has_won_token_broadcast_ &&
                  (pending_messages_.size() > 0 || due_poll_index_(now) >= 0)) {
         NodeType offer_node_type = static_cast<NodeType>(payload[TOKEN_OFFER_NODE_TYPE_POS]);
@@ -344,7 +347,7 @@ void Comfortnet::handle_message_(bool is_tx, uint32_t now) {
               send_param_1 == pending_messages_.front().send_param_1) {
             should_ack = MessageAckAction::NONE;
             if (payload_len < 1 || payload[ACK_POS] != R2R_ACK) {
-              ESP_LOGW(TAG, "Corodinator did not ACK our 0x%02X", message_type);
+              ESP_LOGW(TAG, "Corodinator did not ACK our 0x%02X", static_cast<uint8_t>(message_type));
             }
           } else if (message_type == PACKET_RESPONSE(pending_messages_.front().packet_type) &&
                      send_param_1 == pending_messages_.front().send_param_1) {
@@ -403,9 +406,10 @@ void Comfortnet::handle_message_(bool is_tx, uint32_t now) {
           transmit_message_(src_adr, this->node_id_, this->subnet_, SendMethod::NO_ROUTE, 0, 0, this->device_type_,
                             message_type, PACKET_NUMBER(true, this->subnet_ == Subnet::VERSION_1), return_payload);
         } else if (should_ack == MessageAckAction::NAK) {
-          ESP_LOGW(TAG, "We are supposed to NAK to 0x%02X, but don't know how!", message_type);
+          ESP_LOGW(TAG, "We are supposed to NAK to 0x%02X, but don't know how!", static_cast<uint8_t>(message_type));
         } else if (!PACKET_IS_DATAFLOW(packet_number) && should_ack == MessageAckAction::UNKNOWN) {
-          ESP_LOGW(TAG, "We are supposed to respond to 0x%02X, but don't know how!", message_type);
+          ESP_LOGW(TAG, "We are supposed to respond to 0x%02X, but don't know how!",
+                     static_cast<uint8_t>(message_type));
         }
       }
     }
@@ -457,11 +461,12 @@ void Comfortnet::handle_message_(bool is_tx, uint32_t now) {
                         PACKET_NUMBER(false, this->subnet_ == Subnet::VERSION_1), return_payload);
       this->awaiting_discovery_ = false;
       if (start_id == static_cast<NodeAddress>(0)) {
-        ESP_LOGI(TAG, "Joined network as address: 0x%02X", this->node_id_);
+        ESP_LOGI(TAG, "Joined network as address: 0x%02X", static_cast<uint8_t>(this->node_id_));
         call_listener_(DATA_KEY_NETWORK_STATUS,
                        (struct ComfortnetData) {this->device_type_, ComfortnetData::DataType::BOOLEAN, true});
       } else if (start_id != this->node_id_) {
-        ESP_LOGI(TAG, "Network address reassigned: 0x%02X (Old: 0x%02X)", this->node_id_, start_id);
+        ESP_LOGI(TAG, "Network address reassigned: 0x%02X (Old: 0x%02X)", static_cast<uint8_t>(this->node_id_),
+                 static_cast<uint8_t>(start_id));
       }
     }
   }
@@ -486,7 +491,8 @@ void Comfortnet::handle_message_(bool is_tx, uint32_t now) {
     const uint8_t *cmd_payload = payload + CONTROL_CMD_SIZE;
     uint8_t cmd_payload_len = payload_len - CONTROL_CMD_SIZE;
     ESP_LOGD(TAG, "Command | Payload HEX");
-    ESP_LOGD(TAG, "0x%04X  | %s", command_type, esphome::format_hex_pretty(cmd_payload, cmd_payload_len).c_str());
+    ESP_LOGD(TAG, "0x%04X  | %s", static_cast<uint16_t>(command_type),
+             esphome::format_hex_pretty(cmd_payload, cmd_payload_len).c_str());
     call_command_listener_((struct ComfortnetCommandData) {
         message_type == MessageType::SET_CONTROL_COMMAND ? get_node_type_(dst_adr) : source_node_type,
         get_node_mac_(message_type == MessageType::SET_CONTROL_COMMAND ? dst_adr : src_adr), command_type,
@@ -530,7 +536,7 @@ void Comfortnet::write_message_to_buffer_(std::vector<uint8_t> &buffer, NodeAddr
     message_queued_ = require_arbitration ? QueuedMessageType::ARBITRATION : QueuedMessageType::NORMAL;
     if (message_queued_ == QueuedMessageType::ARBITRATION) {
       slot_delay_ = generate_slot_delay_();
-      ESP_LOGI(TAG, "Will arbitrate with slot delay of %u", slot_delay_);
+      ESP_LOGI(TAG, "Will arbitrate with slot delay of %" PRIu32, slot_delay_);
     }
   }
 }

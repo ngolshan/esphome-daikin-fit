@@ -52,7 +52,7 @@ logger:
 
 api:
   encryption:
-    key: !secret daikin_bus_monitor_api_key
+    key: !secret daikin_bus_monitor__encryption_key
 
 ota:
   - platform: esphome

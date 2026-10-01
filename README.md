@@ -81,7 +81,7 @@ it is the only file the add-on needs:
 
 1. In the ESPHome add-on (ESPHome Device Builder), create a device config with
    that file's contents, named after your device.
-2. Put `wifi_ssid`, `wifi_password` and `daikin_bus_monitor_api_key` in the
+2. Put `wifi_ssid`, `wifi_password` and `daikin_bus_monitor__encryption_key` in the
    add-on's `secrets.yaml`.
 3. Install, wirelessly for a device that is already running.
 

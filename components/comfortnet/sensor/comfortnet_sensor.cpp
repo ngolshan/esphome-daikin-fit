@@ -11,10 +11,11 @@ void ComfortnetSensor::setup() {
     [this](const ComfortnetData &datapoint) {
       if (datapoint.device_type == this->sensor_target_device_type_ || this->sensor_target_device_type_ == NodeType::ANY) {
         if (datapoint.type == ComfortnetData::DataType::FLOAT) {
-          ESP_LOGV(TAG, "Callback Sensor: %s Device: 0x%02X Value: %.1f%%", this->sensor_key_.c_str(), datapoint.device_type, std::get<float>(datapoint.data));
+          ESP_LOGV(TAG, "Callback Sensor: %s Device: 0x%02X Value: %.1f%%", this->sensor_key_.c_str(), static_cast<uint8_t>(datapoint.device_type), std::get<float>(datapoint.data));
           this->publish_state(std::get<float>(datapoint.data));
         } else {
-          ESP_LOGW(TAG, "Callback Sensor: %s received wrong data type %u", datapoint.type);
+          ESP_LOGW(TAG, "Callback Sensor: %s received wrong data type %u", this->sensor_key_.c_str(),
+                   static_cast<uint8_t>(datapoint.type));
         }
       }
     });
@@ -23,7 +24,7 @@ void ComfortnetSensor::setup() {
 void ComfortnetSensor::dump_config() {
   LOG_SENSOR("", "ComfortNet Sensor", this);
   ESP_LOGCONFIG(TAG, "  Sensor Key: %s", this->sensor_key_.c_str());
-  ESP_LOGCONFIG(TAG, "  Target Device Type: %02x", this->sensor_target_device_type_);
+  ESP_LOGCONFIG(TAG, "  Target Device Type: %02x", static_cast<uint8_t>(this->sensor_target_device_type_));
 }
 
 }  // namespace comfortnet
