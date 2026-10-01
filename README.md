@@ -71,6 +71,23 @@ no control commands. Details are in [`docs/how-it-works.md`](docs/how-it-works.m
 For a different ESP32 board, copy the device config and change the board, the
 UART pins and the RS485 direction pin (`flow_control_pin`).
 
+### Building from the Home Assistant add-on
+
+To let Home Assistant handle updates, use
+[`firmware/ha-addon/daikin-bus-monitor.yaml`](firmware/ha-addon/daikin-bus-monitor.yaml)
+instead. It pulls the component and the decode package from this repository, so
+it is the only file the add-on needs:
+
+1. In the ESPHome add-on (ESPHome Device Builder), create a device config with
+   that file's contents, named after your device.
+2. Put `wifi_ssid`, `wifi_password`, `fallback_wifi_password`,
+   `daikin_bus_monitor_api_key` and `daikin_bus_monitor_ota_password` in the
+   add-on's `secrets.yaml`.
+3. Install, wirelessly for a device that is already running.
+
+To take over a device flashed from a local checkout, keep the same `name`, API
+key and OTA password; otherwise the add-on cannot update it over the air.
+
 ## Home Assistant
 
 Entities appear on four devices: **Heat Pump** (27), **Air Handler** (11),
@@ -86,7 +103,8 @@ bus source, encoding and how confident the decode is.
 components/comfortnet/          ClimateTalk component (modified esphome-comfortnet)
 firmware/
   daikin-fit.yaml               decode package: fields and entities
-  waveshare-esp32-s3-rs485-can.yaml   device config
+  waveshare-esp32-s3-rs485-can.yaml   device config, builds from this checkout
+  ha-addon/daikin-bus-monitor.yaml    device config for the Home Assistant add-on
   secrets.yaml.example
 docs/
   wiring.md                     tapping the bus safely
