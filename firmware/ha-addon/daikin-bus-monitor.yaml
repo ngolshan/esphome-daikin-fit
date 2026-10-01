@@ -9,10 +9,10 @@
 # GitHub, so it is the only file you need on the add-on.
 #
 # Secrets this needs in /config/esphome/secrets.yaml:
-#   wifi_ssid, wifi_password, fallback_wifi_password,
-#   daikin_bus_monitor_api_key, daikin_bus_monitor_ota_password
-# To take over a device that is already running, the API key and OTA password
-# must be the same ones it was flashed with, and `name` must match.
+#   wifi_ssid, wifi_password, fallback_wifi_password, daikin_bus_monitor_api_key
+# To take over a device that is already running, the api encryption key must be
+# the one it was flashed with, and `name` must match: OTA uploads authenticate
+# with that key.
 #
 # LISTEN ONLY BY DEFAULT: nothing is written to the bus until the "Bus Transmit"
 # switch is turned on in Home Assistant. See docs/how-it-works.md.
