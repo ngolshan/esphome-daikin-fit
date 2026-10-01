@@ -61,7 +61,11 @@ api:
 
 ota:
   - platform: esphome
-    password: !secret daikin_bus_monitor_ota_password
+    # No password: a bare encryption block makes OTA uploads authenticate with
+    # the api encryption key above, which the device already accepts. A password
+    # would cost about 3.5 KB of flash for nothing. Needs ESPHome 2026.9 or newer
+    # on both the builder and the uploader.
+    encryption:
 
 wifi:
   ssid: !secret wifi_ssid

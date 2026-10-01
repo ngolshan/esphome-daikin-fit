@@ -58,8 +58,9 @@ no control commands. Details are in [`docs/how-it-works.md`](docs/how-it-works.m
    driver-enable jamming a live bus.
 2. Copy `firmware/secrets.yaml.example` to `firmware/secrets.yaml` and fill it
    in.
-3. Build and flash from a full checkout of this repository, with a recent
-   ESPHome (tested with 2026.8.2; sub-devices need 2025.7 or later):
+3. Build and flash from a full checkout of this repository with ESPHome
+   **2026.9 or newer** (tested with 2026.9.1). OTA uploads authenticate with
+   the api encryption key, which needs 2026.9 on the uploader as well:
 
    ```bash
    esphome run firmware/waveshare-esp32-s3-rs485-can.yaml
@@ -80,13 +81,12 @@ it is the only file the add-on needs:
 
 1. In the ESPHome add-on (ESPHome Device Builder), create a device config with
    that file's contents, named after your device.
-2. Put `wifi_ssid`, `wifi_password`, `fallback_wifi_password`,
-   `daikin_bus_monitor_api_key` and `daikin_bus_monitor_ota_password` in the
-   add-on's `secrets.yaml`.
+2. Put `wifi_ssid`, `wifi_password`, `fallback_wifi_password` and
+   `daikin_bus_monitor_api_key` in the add-on's `secrets.yaml`.
 3. Install, wirelessly for a device that is already running.
 
-To take over a device flashed from a local checkout, keep the same `name`, API
-key and OTA password; otherwise the add-on cannot update it over the air.
+To take over a device flashed from a local checkout, keep the same `name` and
+API key; otherwise the add-on cannot update it over the air.
 
 ## Home Assistant
 
