@@ -59,8 +59,9 @@ no control commands. Details are in [`docs/how-it-works.md`](docs/how-it-works.m
 2. Copy `firmware/secrets.yaml.example` to `firmware/secrets.yaml` and fill it
    in.
 3. Build and flash from a full checkout of this repository with ESPHome
-   **2026.9 or newer** (tested with 2026.9.1). OTA uploads authenticate with
-   the api encryption key, which needs 2026.9 on the uploader as well:
+   **2026.11 or newer** (tested with 2026.11.0). ESPHome 2026.11 changed the
+   sub-device schema, so older releases reject this config. OTA uploads
+   authenticate with the api encryption key:
 
    ```bash
    esphome run firmware/waveshare-esp32-s3-rs485-can.yaml

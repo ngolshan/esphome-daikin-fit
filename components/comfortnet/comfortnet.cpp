@@ -18,6 +18,29 @@ static const uint32_t SILENCE_TIMEOUT = 60000;  // How long we will wait for any
                                                 // unavailable (This is not official spec,
                                                 // but for monitoring purposes. May need adjustment.)
 
+// Payload bytes as the log has always shown them: dot-separated uppercase hex, with a byte count after more than four
+// bytes ("60.3C", "00.09.19.0B.0B (5)"). ESPHome 2026.11 removed format_hex_pretty(), which produced this, and
+// tools/ctcap.py parses it, so the format must not change.
+static std::string format_payload_hex(const uint8_t *data, size_t length) {
+  static const char HEX_DIGITS[] = "0123456789ABCDEF";
+  std::string out;
+  if (length == 0)
+    return out;
+  out.reserve(length * 3 + 8);
+  for (size_t i = 0; i < length; i++) {
+    if (i != 0)
+      out += '.';
+    out += HEX_DIGITS[data[i] >> 4];
+    out += HEX_DIGITS[data[i] & 0x0F];
+  }
+  if (length > 4) {
+    char count[16];
+    snprintf(count, sizeof(count), " (%u)", static_cast<unsigned>(length));
+    out += count;
+  }
+  return out;
+}
+
 // Packet information
 static const uint8_t PACKET_HEADER_SIZE = 10;
 static const uint8_t PACKET_CRC_SIZE = 2;
@@ -75,7 +98,7 @@ void Comfortnet::dump_config() {
     ESP_LOGCONFIG(TAG, "  Poll: message 0x%02X to node type 0x%02X, every %" PRIu32 " ms, payload %s",
                   static_cast<uint8_t>(e.poll_message), static_cast<uint8_t>(e.node_type),
                   e.interval_ms != 0 ? e.interval_ms : this->update_interval_millis_,
-                  esphome::format_hex_pretty(e.payload).c_str());
+                  format_payload_hex(e.payload.data(), e.payload.size()).c_str());
   }
 }
 
@@ -172,7 +195,7 @@ void Comfortnet::handle_message_(bool is_tx, uint32_t now) {
       is_tx ? "TX" : "RX", static_cast<uint8_t>(dst_adr), static_cast<uint8_t>(src_adr),
       static_cast<uint8_t>(subnet), static_cast<uint8_t>(send_method), (send_param_1 << 8) | send_param_2,
       static_cast<uint8_t>(source_node_type), static_cast<uint8_t>(message_type), packet_number, payload_len, crc,
-      esphome::format_hex_pretty(payload, payload_len).c_str());
+      format_payload_hex(payload, payload_len).c_str());
   if (is_tx) {
     if (message_type == MessageType::TOKEN_OFFER_RESPONSE) {
       // Most likely we won the token offer broadcast
@@ -492,7 +515,7 @@ void Comfortnet::handle_message_(bool is_tx, uint32_t now) {
     uint8_t cmd_payload_len = payload_len - CONTROL_CMD_SIZE;
     ESP_LOGD(TAG, "Command | Payload HEX");
     ESP_LOGD(TAG, "0x%04X  | %s", static_cast<uint16_t>(command_type),
-             esphome::format_hex_pretty(cmd_payload, cmd_payload_len).c_str());
+             format_payload_hex(cmd_payload, cmd_payload_len).c_str());
     call_command_listener_((struct ComfortnetCommandData) {
         message_type == MessageType::SET_CONTROL_COMMAND ? get_node_type_(dst_adr) : source_node_type,
         get_node_mac_(message_type == MessageType::SET_CONTROL_COMMAND ? dst_adr : src_adr), command_type,

@@ -39,19 +39,25 @@ substitutions:
   bus_transmit_at_boot: ALWAYS_OFF
 
 esphome:
-  # Sub-devices need a recent ESPHome.
-  min_version: "2025.7.0"
+  # Sub-devices take a mandatory `relation` since ESPHome 2026.11, and older
+  # releases reject the option.
+  min_version: "2026.11.0"
   includes:
     - <vector>
   # One Home Assistant device per piece of equipment, so each gets its own
-  # Sensors list instead of one long list on the monitor.
+  # Sensors list instead of one long list on the monitor. `relation: via` marks
+  # each as separate equipment reached through the monitor; ESPHome 2026.11
+  # made the option mandatory.
   devices:
     - id: zone_controller
       name: "Zone Controller"
+      relation: via
     - id: heat_pump
       name: "Heat Pump"
+      relation: via
     - id: air_handler
       name: "Air Handler"
+      relation: via
 
 comfortnet:
   on_packet:
