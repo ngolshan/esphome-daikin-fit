@@ -102,9 +102,21 @@ comfortnet:
               id(hp_compressor_runtime).publish_state((p[41] << 8) | p[40]);
               id(hp_ah_airflow_request).publish_state((p[44] << 8) | p[43]);
             } else if (data.payload_len == 35) {
-              // Byte 3: an operation mode code whose meanings are undocumented;
-              // published as the plain number. See the sensor definition.
+              // Byte 3: operation mode code, published as the plain number and,
+              // where the heat pump's own status menu named it often enough, as
+              // text. See the two entity definitions.
               id(hp_operation_mode_code).publish_state(p[3]);
+              const char *mode = nullptr;
+              switch (p[3]) {
+                case 0: case 1: mode = "Stop"; break;
+                case 3: case 8: mode = "Heating startup"; break;
+                case 9: mode = "Heating"; break;
+                case 11: mode = "Defrost"; break;
+                case 4: mode = "Cooling startup"; break;
+                case 5: mode = "Cooling"; break;
+              }
+              std::string mode_text = mode ? std::string(mode) : "Code " + to_string(p[3]);
+              if (id(hp_operation_mode).state != mode_text) id(hp_operation_mode).publish_state(mode_text);
             }
 
     # Air handler, Get Mfr Generic Data response: blower speed and EEV opening.
@@ -212,8 +224,8 @@ comfortnet:
                 // Byte 4: dehumidification demand received. Matched the cloud's
                 // ctOutdoorDeHumidificationRequestedDemand in 85 of 88 snapshots;
                 // during a dehumidification call it carries the demand and byte 3
-                // (cool) reads 0. Byte 7: defrost demand, UNVERIFIED (ClimateTalk
-                // status layout; no defrost seen yet).
+                // (cool) reads 0. Byte 7: UNVERIFIED, named "defrost demand" in
+                // upstream's map; it stayed 0 through nine defrosts.
                 id(hp_dehum_demand_received).publish_state(d.data[4] / 2.0f);
                 id(hp_defrost_demand_received).publish_state(d.data[7] / 2.0f);
                 if (!id(zc_dehum_demand).has_state() && d.data[4] == 0) id(zc_dehum_demand).publish_state(0.0f);
@@ -305,17 +317,11 @@ sensor:
   - platform: template
     id: hp_operation_mode_code
     # 35-byte 0xA0, byte 3 (cloud field ctOutdoorOperationMode), published as a
-    # whole number. No source documents what the numbers mean:
-    #   * Daikin's outdoor unit manual (DH7VSA, Monitor Mode item 2) defines a
-    #     different "operation code": 0 Stop, 1 Cooling Start-up, 2 Heating
-    #     Start-up, 3 Oil Return, 4 Heating, 5 Defrost, 6 Cooling. It does not
-    #     match this byte: the cloud pairs this byte's 5 with "Cooling", and
-    #     the byte reaches 7, 8, 9 and 12.
-    #   * The only Daikin-side pairs seen are cloud snapshots reporting both this
-    #     number and ctOutdoorMode text: 0, 2 and 4 with "Stop", 5 and 6 with
-    #     "Cooling" (cooling run only).
-    # Values seen so far: 0-9 and 12. No state class, so Home Assistant does not
-    # average codes.
+    # whole number. It is finer-grained than the seven states of the manual's
+    # "operation code" (DH7VSA, Monitor Mode item 2), whose numbers it does not
+    # share. Values seen: 0-9, 11, 12, 15, 16. The "Operation Mode" text entity
+    # names the ones that could be named; docs/decoded-fields.md has the
+    # evidence. No state class, so Home Assistant does not average codes.
     name: "Operation Mode Code"
     device_id: heat_pump
     icon: "mdi:numeric"
@@ -348,10 +354,10 @@ sensor:
     accuracy_decimals: 1
   - platform: template
     id: hp_defrost_demand_received
-    # UNVERIFIED: heat pump status block 0x00 byte 7, per upstream's map; 0 in
-    # all 309 samples (no defrost has happened). VERIFY during a heating-season
-    # defrost: Heat Pump Operation Mode Code should show an unfamiliar value at
-    # the same time as this becomes non-zero. Then drop "(Unverified)" from the name.
+    # UNVERIFIED: heat pump status block 0x00 byte 7, per upstream's map. It
+    # stayed 0 through nine defrost cycles (operation mode code 11) in
+    # November 2026, so it does not flag a defrost. What it carries is unknown;
+    # see docs/decoded-fields.md.
     name: "Defrost Demand Received (Unverified)"
     device_id: heat_pump
     unit_of_measurement: "%"
@@ -696,6 +702,17 @@ sensor:
     state_class: total_increasing
     accuracy_decimals: 0
     entity_category: diagnostic
+
+text_sensor:
+  - platform: template
+    id: hp_operation_mode
+    # Operation Mode Code as text. The names are the heat pump's own: it answers
+    # a text status menu (0x41 request, page 3) whose mode line was read from
+    # the bus next to this code for 29 days. Only codes that showed the same
+    # name in at least five clean samples are named; the rest read "Code N".
+    name: "Operation Mode"
+    device_id: heat_pump
+    icon: "mdi:state-machine"
 
 switch:
   - platform: template

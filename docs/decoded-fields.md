@@ -47,11 +47,12 @@ firmware from other readings.
 
 | Entity | Source | Encoding | Confidence | Cloud field |
 |---|---|---|---|---|
-| Operation Mode Code | `05/0xA0` 35-byte, byte 3 | u8 code | Verified (97 %); meanings undocumented | `ctOutdoorOperationMode` |
+| Operation Mode Code | `05/0xA0` 35-byte, byte 3 | u8 code | Verified (97 %) | `ctOutdoorOperationMode` |
+| Operation Mode | same byte, as text | name from the heat pump's status menu | Named for 8 of 14 codes; see below | — |
 | Cool Demand Received | `05/0x82` DBID 0x00, byte 3 | half-percent | Verified (100 %) | `ctOutdoorCoolRequestedDemand` |
 | Heat Demand Received | `05/0x82` DBID 0x00, byte 2 | half-percent | Observed (tracked heat demand in the heating check) | `ctOutdoorHeatRequestedDemand` |
 | Dehumidification Demand Received | `05/0x82` DBID 0x00, byte 4 | half-percent | Verified (97 % of 88 snapshots) | `ctOutdoorDeHumidificationRequestedDemand` |
-| Defrost Demand Received (Unverified) | `05/0x82` DBID 0x00, byte 7 | half-percent | Unverified | — |
+| Defrost Demand Received (Unverified) | `05/0x82` DBID 0x00, byte 7 | half-percent | Unverified; 0 through nine defrosts | — |
 | Critical Fault Code, Minor Fault Code | `05/0x82` DBID 0x00, bytes 0, 1 | u8 | Observed (0 throughout) | `ctOutdoorCriticalFault`, `ctOutdoorMinorFault` |
 | Requested Air Handler Fan | fan command `0x66` sent by the heat pump, byte 2 | half-percent | Verified (values match) | `ctOutdoorFanRequestedDemandPercentage` |
 | Requested Air Handler Airflow | `05/0xA0` 60-byte, bytes 43–44 | u16 LE, CFM | Verified (97 %) | `ctOutdoorRequestedIndoorAirflow` |
@@ -129,21 +130,53 @@ anything else as the heat pump. The heat pump keeps requesting fan while it
 winds down after a call ends, so mixing the two makes an idle system look
 "fan only".
 
-### Operation Mode Code
+### Operation Mode Code and Operation Mode
 
-What the numbers mean is not documented, so only the number is published.
-Values seen: 0–9 and 12.
+The code is published as a number, and as text ("Operation Mode") where a name
+could be established. Values seen: 0–9, 11, 12, 15, 16.
 
-- Daikin's DH7VSA installation manual (Monitor Mode item 2, "Operation code")
-  lists 0 Stop, 1 Cooling start-up, 2 Heating start-up, 3 Oil return,
-  4 Heating, 5 Defrost, 6 Cooling. That table does **not** describe this byte:
-  the cloud pairs this byte's 5 with "Cooling", and the byte reaches 7, 8, 9
-  and 12.
-- Cloud snapshots reporting both this number and the `ctOutdoorMode` text
-  paired 0, 2 and 4 with "Stop", and 5 and 6 with "Cooling".
-- Sequences seen (not meanings): cooling ran 0 → 2 → 4 → 5, with 6 while the
-  compressor ramped and 7 → 1 → 0 at the end. Heating ran 0 → 3 → 8 → 9,
-  ending 12 → 1 → 0.
+The names come from the heat pump itself. A thermostat pages through a text
+status menu on the heat pump (`0x41` request, page 3), and the reply has a
+mode line. Over 29 days (29 Oct – 27 Nov 2026, about 8,100 menu replies) each
+reply was paired with the code read from the 35-byte block just before and
+just after it. A sample is "clean" when both readings, each within 90 s, agree.
+
+| Code | Menu's mode line | Clean samples | Published as |
+|---|---|---|---|
+| 0 | Stop | 4257 | Stop |
+| 1 | Stop | 41 | Stop |
+| 3 | Heating startup | 9 | Heating startup |
+| 8 | Heating startup | 29 | Heating startup |
+| 9 | Heating | 3611 | Heating |
+| 11 | Defrost | 5 | Defrost |
+| 4 | Cooling startup | 8 | Cooling startup |
+| 5 | Cooling | 95 | Cooling |
+| 2 | Cooling startup | 1 | Code 2 |
+| 6 | Oil return | 1 | Code 6 |
+| 7 | Cooling | 1 | Code 7 |
+| 12 | Heating | 2 | Code 12 |
+| 15 | none (3 samples as the code changed 15 → 11 read Defrost) | 0 | Code 15 |
+| 16 | none (1 sample each at 11 → 16 and 16 → 9 read Defrost) | 0 | Code 16 |
+
+No clean sample contradicted the table: every code showed one name only.
+Codes with fewer than five clean samples keep the number until more are seen.
+
+- The menu uses the seven state names of the DH7VSA manual's "operation code"
+  (Monitor Mode item 2: 0 Stop, 1 Cooling start-up, 2 Heating start-up, 3 Oil
+  return, 4 Heating, 5 Defrost, 6 Cooling). The manual's numbers do **not**
+  apply to this byte, which is finer-grained: several codes share one name.
+- Cloud snapshots pairing this number with the `ctOutdoorMode` text gave 0, 2
+  and 4 with "Stop" and 5 and 6 with "Cooling". Where that disagrees with the
+  bus (2, 4, 6) the table follows the bus, read within seconds of the code.
+- Sequences: cooling runs 0 → 2 → 4 → 5 → 7 → 1 → 0, with 5 → 6 → 5 seen twice.
+  Heating runs 0 → 3 → 8 → 9 → 12 → 1 → 0. A defrost runs 9 → 15 → 11 → 16 → 9.
+- Defrost as seen nine times on a DH7VSA2410 with a DFVE air handler and no
+  heat kit: code 15 for about a minute (compressor stops), code 11 for about
+  two minutes (outdoor fan stopped, the heat pump commands the indoor blower
+  to 0, the outdoor coil warms to 60–107 °F), then 16 and back to 9. All nine
+  started with the outdoor coil at 39–54 °F, so none was a response to frost.
+  By the menu's hour counter they came 23–25 h apart six times, and 58 h and
+  47 h apart the other two; what schedules them is not known.
 
 ### Inverter Fin Temperature
 
@@ -254,10 +287,12 @@ non-zero value.
 
 ## Open questions
 
-- Operation mode codes for defrost and other heating states.
-- Verify Defrost Demand Received (Heat Pump status byte 7): during a
-  heating-season defrost it should turn non-zero while Operation Mode Code
-  shows a new value. Then drop "(Unverified)" from its name.
+- Names for operation mode codes 2, 6, 7, 12, 15 and 16 (too few samples).
+- What Heat Pump status byte 7 ("Defrost Demand Received") carries. It stayed
+  0 through nine defrosts, so it is not a defrost flag. One untested idea: a
+  request for backup heat during defrost, which a system with no heat kit
+  would never raise. No `0x68` (Defrost Heat Demand) command was seen either.
+- What schedules a defrost when there is no frost.
 - The inverter fin temperature unit.
 - Why Air Handler Liquid Line Temperature reads below return air when heating.
 - Which air handler fan demand byte is "current" and which "received".
